@@ -51,6 +51,9 @@ pipeline {
 
         stage('Verify Deployment') {
             steps {
+                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
+                bat 'kubectl config current-context'
+                bat 'kubectl config view --minify -o jsonpath="{.clusters[0].cluster.server}"'
                 bat 'kubectl rollout status deployment/flask-deployment -n devops-project --timeout=120s'
                 bat 'kubectl get pods -n devops-project'
                 bat 'kubectl get services -n devops-project'
