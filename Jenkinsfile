@@ -60,8 +60,9 @@ pipeline {
                 }
             }
         }
+    }
 
-        post {
+    post {
          success {
             echo 'Flask application deployed successfully to Kubernetes!'
         }
@@ -69,8 +70,8 @@ pipeline {
         failure {
             echo 'Pipeline failed. Check Console Output for the failing stage.'
         }
-    }
- }
-}
+     }
+  }
+
 
 
