@@ -9,11 +9,19 @@ pipeline {
             }
         }
 
+        stage('Run Python Tests') {
+            steps {
+                bat 'python -m pip install -r requirements.txt'
+                bat 'python -m pytest -v'
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 bat 'docker build -t python-flask-app:1.0 .'
             }
         }
+
 
         stage('Verify Docker Image') {
             steps {
