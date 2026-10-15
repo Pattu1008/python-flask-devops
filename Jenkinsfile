@@ -61,8 +61,8 @@ pipeline {
             }
         }
 
-    post {
-        success {
+        post {
+         success {
             echo 'Flask application deployed successfully to Kubernetes!'
         }
 
