@@ -37,5 +37,12 @@ pipeline {
                 '''
             }
         }
+        stage('Health Check') {
+            steps {
+               bat '''
+               powershell -NoProfile -Command "$ok = $false; for ($i = 0; $i -lt 10; $i++) { try { $r = Invoke-WebRequest -Uri 'http://localhost:5000/' -UseBasicParsing -TimeoutSec 3; if ($r.StatusCode -eq 200) { $ok = $true; break } } catch { Start-Sleep -Seconds 3 } }; if (-not $ok) { docker logs python-flask-container; exit 1 }; Write-Output 'Health check passed: HTTP 200 OK'"
+               '''
+            }
+        }
     }
 }
