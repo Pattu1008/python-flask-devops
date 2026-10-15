@@ -29,14 +29,7 @@ pipeline {
             }
         }
 
-        stage('Verify Kubernetes Connection') {
-            steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-            bat 'kubectl config current-context'
-            bat 'kubectl get nodes'
-               }
-            }
-        }
+        
 
         stage('Load Image into Kind') {
             steps {
