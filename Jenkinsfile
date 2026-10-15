@@ -33,7 +33,7 @@ pipeline {
 
         stage('Load Image into Kind') {
             steps {
-                bat 'kind load docker-image python-flask-app:1.0 --name devops-lab'
+                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\kind\\kind.exe" load docker-image python-flask-app:1.0 --name devops-lab'
             }
         }
 
