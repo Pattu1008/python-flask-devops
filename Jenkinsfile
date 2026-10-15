@@ -1,18 +1,19 @@
+
 pipeline {
     agent any
 
     stages {
         stage('Checkout') {
             steps {
-                echo 'Starting Flask project pipeline'
+                echo 'Starting Flask Kubernetes deployment pipeline'
                 checkout scm
             }
         }
 
         stage('Run Python Tests') {
             steps {
-               bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pip install -r requirements.txt'
-               bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pytest -v'
+                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pip install -r requirements.txt'
+                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pytest -v'
             }
         }
 
@@ -22,27 +23,51 @@ pipeline {
             }
         }
 
-
         stage('Verify Docker Image') {
             steps {
                 bat 'docker images python-flask-app'
             }
         }
 
-        stage('Deploy Application') {
+        stage('Verify Kubernetes Connection') {
             steps {
-                bat '''
-                docker rm -f python-flask-container 2>NUL
-                docker run -d --name python-flask-container -p 5000:5000 python-flask-app:1.0
-                '''
+                bat 'where kubectl'
+                bat 'kubectl config current-context'
+                bat 'kubectl get nodes'
             }
         }
-        stage('Health Check') {
+
+        stage('Load Image into Kind') {
             steps {
-               bat '''
-               powershell -NoProfile -Command "$ok = $false; for ($i = 0; $i -lt 10; $i++) { try { $r = Invoke-WebRequest -Uri 'http://localhost:5000/' -UseBasicParsing -TimeoutSec 3; if ($r.StatusCode -eq 200) { $ok = $true; break } } catch { Start-Sleep -Seconds 3 } }; if (-not $ok) { docker logs python-flask-container; exit 1 }; Write-Output 'Health check passed: HTTP 200 OK'"
-               '''
+                bat 'kind load docker-image python-flask-app:1.0 --name devops-lab'
             }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                bat 'kubectl config use-context kind-devops-lab'
+                bat 'kubectl apply -f kubernetes/namespace.yaml'
+                bat 'kubectl apply -f kubernetes/deployment.yaml'
+                bat 'kubectl apply -f kubernetes/service.yaml'
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                bat 'kubectl rollout status deployment/flask-deployment -n devops-project --timeout=120s'
+                bat 'kubectl get pods -n devops-project'
+                bat 'kubectl get services -n devops-project'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Flask application deployed successfully to Kubernetes!'
+        }
+
+        failure {
+            echo 'Pipeline failed. Check Console Output for the failing stage.'
         }
     }
 }
