@@ -45,7 +45,7 @@ pipeline {
                 bat 'kubectl apply -f kubernetes/namespace.yaml'
                 bat 'kubectl apply -f kubernetes/deployment.yaml'
                 bat 'kubectl apply -f kubernetes/service.yaml'
-            }
+              }
             }
         }
 
@@ -57,9 +57,9 @@ pipeline {
                 bat 'kubectl rollout status deployment/flask-deployment -n devops-project --timeout=120s'
                 bat 'kubectl get pods -n devops-project'
                 bat 'kubectl get services -n devops-project'
+                }
             }
         }
-    }
 
     post {
         success {
@@ -70,4 +70,7 @@ pipeline {
             echo 'Pipeline failed. Check Console Output for the failing stage.'
         }
     }
+ }
 }
+
+
