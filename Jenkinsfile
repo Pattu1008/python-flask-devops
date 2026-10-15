@@ -39,10 +39,13 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
+                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']){
+                bat 'kubectl config get-contexts'
                 bat 'kubectl config use-context kind-devops-lab'
                 bat 'kubectl apply -f kubernetes/namespace.yaml'
                 bat 'kubectl apply -f kubernetes/deployment.yaml'
                 bat 'kubectl apply -f kubernetes/service.yaml'
+            }
             }
         }
 
