@@ -60,7 +60,7 @@ pipeline {
         stage('Create Monitoring Namespace') {
             steps {
                 withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                    bat 'kubectl create namespace monitoring --dry-run=client -o yaml ^| kubectl apply -f -'
+                    bat 'kubectl apply -f kubernetes/monitoring-namespace.yaml'
                 }
             }
         }
