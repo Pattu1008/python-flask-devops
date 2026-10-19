@@ -5,11 +5,10 @@ metadata:
   name: grafana-service
   namespace: monitoring
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: grafana
   ports:
-    - name: web
-      port: 3000
+    - port: 3000
       targetPort: 3000
-      protocol: TCP
+      nodePort: 30030
