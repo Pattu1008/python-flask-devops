@@ -19,7 +19,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                bat 'docker build -t python-flask-app:1.0 .'
+                bat 'docker build -t python-flask-app:1.1 .'
             }
         }
 
@@ -29,49 +29,83 @@ pipeline {
             }
         }
 
-        
-
         stage('Load Image into Kind') {
             steps {
-                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\kind\\kind.exe" load docker-image python-flask-app:1.0 --name devops-lab'
+                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\kind\\kind.exe" load docker-image python-flask-app:1.1 --name devops-lab
+'
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']){
-                bat 'kubectl config get-contexts'
-                bat 'kubectl config use-context kind-devops-lab'
-                bat 'kubectl apply -f kubernetes/namespace.yaml'
-                bat 'kubectl apply -f kubernetes/deployment.yaml'
-                bat 'kubectl apply -f kubernetes/service.yaml'
-              }
+                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
+                    bat 'kubectl config use-context kind-devops-lab'
+                    bat 'kubectl apply -f kubernetes/namespace.yaml'
+                    bat 'kubectl apply -f kubernetes/deployment.yaml'
+                    bat 'kubectl apply -f kubernetes/service.yaml'
+                }
             }
         }
 
         stage('Verify Deployment') {
             steps {
                 withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                bat 'kubectl config current-context'
-                bat 'kubectl config view --minify -o jsonpath="{.clusters[0].cluster.server}"'
-                bat 'kubectl rollout status deployment/flask-deployment -n devops-project --timeout=120s'
-                bat 'kubectl get pods -n devops-project'
-                bat 'kubectl get services -n devops-project'
+                    bat 'kubectl config current-context'
+                    bat 'kubectl config view --minify -o jsonpath="{.clusters[0].cluster.server}"'
+                    bat 'kubectl rollout status deployment/flask-deployment -n devops-project --timeout=120s'
+                    bat 'kubectl get pods -n devops-project'
+                    bat 'kubectl get services -n devops-project'
+                }
+            }
+        }
+
+        stage('Create Monitoring Namespace') {
+            steps {
+                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
+                    bat 'kubectl create namespace monitoring --dry-run=client -o yaml ^| kubectl apply -f -'
+                }
+            }
+        }
+
+        stage('Deploy Prometheus') {
+            steps {
+                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
+                    bat 'kubectl apply -f observability/prometheus/prometheus-configmap.yaml'
+                    bat 'kubectl apply -f observability/prometheus/prometheus-deployment.yaml'
+                    bat 'kubectl apply -f observability/prometheus/prometheus-service.yaml'
+                }
+            }
+        }
+
+        stage('Deploy Grafana') {
+            steps {
+                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
+                    bat 'kubectl apply -f observability/grafana/grafana-datasource.yaml'
+                    bat 'kubectl apply -f observability/grafana/grafana-deployment.yaml'
+                    bat 'kubectl apply -f observability/grafana/grafana-service.yaml'
+                }
+            }
+        }
+
+        stage('Verify Monitoring') {
+            steps {
+                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
+                    bat 'kubectl get configmap -n monitoring'
+                    bat 'kubectl get deployments -n monitoring'
+                    bat 'kubectl get pods -n monitoring'
+                    bat 'kubectl get services -n monitoring'
                 }
             }
         }
     }
 
     post {
-         success {
-            echo 'Flask application deployed successfully to Kubernetes!'
+        success {
+            echo 'Flask application and monitoring resources deployed successfully!'
         }
 
         failure {
             echo 'Pipeline failed. Check Console Output for the failing stage.'
         }
-     }
-  }
-
-
-
+    }
+}
