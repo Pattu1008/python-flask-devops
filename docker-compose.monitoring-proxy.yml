@@ -1,0 +1,17 @@
+
+services:
+  monitoring-host-proxy:
+    image: nginx:alpine
+    container_name: monitoring-host-proxy
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+      - "3000:3000"
+    networks:
+      - kind
+    volumes:
+      - ./monitoring-host-proxy.conf:/etc/nginx/nginx.conf:ro
+
+networks:
+  kind:
+    external: true
