@@ -16,6 +16,7 @@ pipeline {
             steps {
                 echo 'Starting Flask Kubernetes deployment pipeline'
                 checkout scm
+
                 script {
                     env.IMAGE_TAG = "${env.BUILD_NUMBER}"
                     echo "Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
@@ -48,12 +49,15 @@ pipeline {
             }
         }
 
-        stage('Deploy Application to Kubernetes') {
+        stage('Create Application Namespace') {
             steps {
                 bat 'kubectl config use-context kind-devops-lab'
                 bat 'kubectl apply -f kubernetes/namespace.yaml'
+            }
+        }
 
-                // Update the deployment to use this build's image tag.
+        stage('Deploy Application to Kubernetes') {
+            steps {
                 powershell '''
                     $manifest = Get-Content "kubernetes/deployment.yaml" -Raw
                     $manifest = $manifest -replace 'python-flask-app:[^\\s]+', "python-flask-app:$env:IMAGE_TAG"
@@ -62,20 +66,16 @@ pipeline {
 
                 bat 'kubectl apply -f kubernetes/deployment.rendered.yaml'
                 bat 'kubectl apply -f kubernetes/service.yaml'
-                bat 'kubectl apply -f kubernetes/monitoring-proxy.yaml'
-                bat 'kubectl rollout status deployment/monitoring-proxy -n monitoring --timeout=120s'
             }
         }
 
         stage('Verify Application Deployment') {
             steps {
-                bat 'kubectl config current-context'
                 bat 'kubectl rollout status deployment/flask-deployment -n %K8S_NAMESPACE% --timeout=180s'
                 bat 'kubectl get deployment flask-deployment -n %K8S_NAMESPACE%'
                 bat 'kubectl get pods -n %K8S_NAMESPACE%'
                 bat 'kubectl get services -n %K8S_NAMESPACE%'
 
-                // Verify both health and Prometheus metrics endpoints.
                 bat 'kubectl exec deployment/flask-deployment -n %K8S_NAMESPACE% -- python -c "import urllib.request; print(urllib.request.urlopen(\'http://localhost:5000/health\', timeout=5).read().decode()); print(\'Metrics HTTP status:\', urllib.request.urlopen(\'http://localhost:5000/metrics\', timeout=5).status)"'
             }
         }
@@ -92,7 +92,6 @@ pipeline {
                 bat 'kubectl apply -f observability/prometheus/prometheus-deployment.yaml'
                 bat 'kubectl apply -f observability/prometheus/prometheus-service.yaml'
 
-                // Restart Prometheus to load an updated configuration.
                 bat 'kubectl rollout restart deployment/prometheus -n %MONITORING_NAMESPACE%'
                 bat 'kubectl rollout status deployment/prometheus -n %MONITORING_NAMESPACE% --timeout=180s'
             }
@@ -107,12 +106,38 @@ pipeline {
             }
         }
 
-        stage('Verify Monitoring') {
+        stage('Deploy Monitoring Proxy') {
             steps {
-                bat 'kubectl get configmap -n %MONITORING_NAMESPACE%'
-                bat 'kubectl get deployments -n %MONITORING_NAMESPACE%'
-                bat 'kubectl get pods -n %MONITORING_NAMESPACE%'
-                bat 'kubectl get services -n %MONITORING_NAMESPACE%'
+                bat 'kubectl apply -f kubernetes/monitoring-proxy.yaml'
+                bat 'kubectl rollout status deployment/monitoring-proxy -n %MONITORING_NAMESPACE% --timeout=120s'
+                bat 'kubectl get deployment,pods,svc -n %MONITORING_NAMESPACE%'
+            }
+        }
+
+        stage('Expose Monitoring Dashboards') {
+            steps {
+                echo 'Validating Docker Compose configuration'
+                bat 'docker compose -f docker-compose.monitoring-proxy.yml config -q'
+
+                echo 'Starting or updating the host proxy'
+                bat 'docker compose -f docker-compose.monitoring-proxy.yml up -d'
+
+                bat 'docker inspect --format="{{.State.Status}}" monitoring-host-proxy'
+                bat 'docker port monitoring-host-proxy'
+            }
+        }
+
+        stage('Verify Monitoring Dashboard Access') {
+            steps {
+                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:9090/-/ready -TimeoutSec 10 -UseBasicParsing).Content"'
+                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content'
+            }
+        }
+
+        stage('Verify Prometheus Metrics') {
+            steps {
+                bat 'kubectl exec deployment/monitoring-proxy -n %MONITORING_NAMESPACE% -- wget -qO- http://prometheus-service.monitoring.svc.cluster.local:9090/-/ready'
+                bat 'kubectl exec deployment/monitoring-proxy -n %MONITORING_NAMESPACE% -- wget -qO- http://grafana-service.monitoring.svc.cluster.local:3000/api/health'
             }
         }
     }
@@ -120,6 +145,8 @@ pipeline {
     post {
         success {
             echo "Deployment successful! Image: python-flask-app:${env.IMAGE_TAG}"
+            echo 'Prometheus: http://localhost:9090/targets'
+            echo 'Grafana: http://localhost:3000'
         }
 
         failure {
