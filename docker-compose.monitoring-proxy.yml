@@ -5,9 +5,9 @@ services:
     container_name: monitoring-host-proxy
     restart: unless-stopped
     ports:
-  - "9090:9090"
-  - "3000:3000"
-  - "5000:5000"
+      - "9090:9090"
+      - "3000:3000"
+      - "5000:5000"
     networks:
       - kind
     volumes:
