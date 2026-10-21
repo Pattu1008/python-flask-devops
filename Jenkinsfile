@@ -62,6 +62,8 @@ pipeline {
 
                 bat 'kubectl apply -f kubernetes/deployment.rendered.yaml'
                 bat 'kubectl apply -f kubernetes/service.yaml'
+                bat 'kubectl apply -f kubernetes/monitoring-proxy.yaml'
+                bat 'kubectl rollout status deployment/monitoring-proxy -n monitoring --timeout=120s'
             }
         }
 
