@@ -1,105 +1,123 @@
 pipeline {
     agent any
 
+    environment {
+        IMAGE_NAME = 'python-flask-app'
+        K8S_NAMESPACE = 'devops-project'
+        MONITORING_NAMESPACE = 'monitoring'
+        KIND_CLUSTER = 'devops-lab'
+        KUBECONFIG = 'C:\\Users\\Prateek Sangle\\.kube\\config'
+        PYTHON = 'C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
+        KIND_EXE = 'C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\kind\\kind.exe'
+    }
+
     stages {
         stage('Checkout') {
             steps {
                 echo 'Starting Flask Kubernetes deployment pipeline'
                 checkout scm
+                script {
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}"
+                    echo "Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                }
             }
         }
 
         stage('Run Python Tests') {
             steps {
-                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pip install -r requirements.txt'
-                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" -m pytest -v'
+                bat '"%PYTHON%" -m pip install -r requirements.txt'
+                bat '"%PYTHON%" -m pytest -v'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                bat 'docker build -t python-flask-app:1.1 .'
+                bat 'docker build -t %IMAGE_NAME%:%IMAGE_TAG% .'
             }
         }
 
         stage('Verify Docker Image') {
             steps {
-                bat 'docker images python-flask-app'
+                bat 'docker image inspect %IMAGE_NAME%:%IMAGE_TAG%'
             }
         }
 
         stage('Load Image into Kind') {
             steps {
-                bat '"C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\kind\\kind.exe" load docker-image python-flask-app:1.1 --name devops-lab'
+                bat '"%KIND_EXE%" load docker-image %IMAGE_NAME%:%IMAGE_TAG% --name %KIND_CLUSTER%'
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Deploy Application to Kubernetes') {
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                    bat 'kubectl config use-context kind-devops-lab'
-                    bat 'kubectl apply -f kubernetes/namespace.yaml'
-                    bat 'kubectl apply -f kubernetes/deployment.yaml'
-                    bat 'kubectl apply -f kubernetes/service.yaml'
-                }
+                bat 'kubectl config use-context kind-devops-lab'
+                bat 'kubectl apply -f kubernetes/namespace.yaml'
+
+                // Update the deployment to use this build's image tag.
+                powershell '''
+                    $manifest = Get-Content "kubernetes/deployment.yaml" -Raw
+                    $manifest = $manifest -replace 'python-flask-app:[^\\s]+', "python-flask-app:$env:IMAGE_TAG"
+                    Set-Content -Path "kubernetes/deployment.rendered.yaml" -Value $manifest
+                '''
+
+                bat 'kubectl apply -f kubernetes/deployment.rendered.yaml'
+                bat 'kubectl apply -f kubernetes/service.yaml'
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Verify Application Deployment') {
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                    bat 'kubectl config current-context'
-                    bat 'kubectl config view --minify -o jsonpath="{.clusters[0].cluster.server}"'
-                    bat 'kubectl rollout status deployment/flask-deployment -n devops-project --timeout=120s'
-                    bat 'kubectl get pods -n devops-project'
-                    bat 'kubectl get services -n devops-project'
-                }
+                bat 'kubectl config current-context'
+                bat 'kubectl rollout status deployment/flask-deployment -n %K8S_NAMESPACE% --timeout=180s'
+                bat 'kubectl get deployment flask-deployment -n %K8S_NAMESPACE%'
+                bat 'kubectl get pods -n %K8S_NAMESPACE%'
+                bat 'kubectl get services -n %K8S_NAMESPACE%'
+
+                // Verify both health and Prometheus metrics endpoints.
+                bat 'kubectl exec deployment/flask-deployment -n %K8S_NAMESPACE% -- python -c "import urllib.request; print(urllib.request.urlopen(\'http://localhost:5000/health\', timeout=5).read().decode()); print(\'Metrics HTTP status:\', urllib.request.urlopen(\'http://localhost:5000/metrics\', timeout=5).status)"'
             }
         }
 
         stage('Create Monitoring Namespace') {
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                    bat 'kubectl apply -f kubernetes/monitoring-namespace.yaml'
-                }
+                bat 'kubectl apply -f kubernetes/monitoring-namespace.yaml'
             }
         }
 
         stage('Deploy Prometheus') {
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                    bat 'kubectl apply -f observability/prometheus/prometheus-configmap.yaml'
-                    bat 'kubectl apply -f observability/prometheus/prometheus-deployment.yaml'
-                    bat 'kubectl apply -f observability/prometheus/prometheus-service.yaml'
-                }
+                bat 'kubectl apply -f observability/prometheus/prometheus-configmap.yaml'
+                bat 'kubectl apply -f observability/prometheus/prometheus-deployment.yaml'
+                bat 'kubectl apply -f observability/prometheus/prometheus-service.yaml'
+
+                // Restart Prometheus to load an updated configuration.
+                bat 'kubectl rollout restart deployment/prometheus -n %MONITORING_NAMESPACE%'
+                bat 'kubectl rollout status deployment/prometheus -n %MONITORING_NAMESPACE% --timeout=180s'
             }
         }
 
         stage('Deploy Grafana') {
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                    bat 'kubectl apply -f observability/grafana/grafana-datasource.yaml'
-                    bat 'kubectl apply -f observability/grafana/grafana-deployment.yaml'
-                    bat 'kubectl apply -f observability/grafana/grafana-service.yaml'
-                }
+                bat 'kubectl apply -f observability/grafana/grafana-datasource.yaml'
+                bat 'kubectl apply -f observability/grafana/grafana-deployment.yaml'
+                bat 'kubectl apply -f observability/grafana/grafana-service.yaml'
+                bat 'kubectl rollout status deployment/grafana -n %MONITORING_NAMESPACE% --timeout=180s'
             }
         }
 
         stage('Verify Monitoring') {
             steps {
-                withEnv(['KUBECONFIG=C:\\Users\\Prateek Sangle\\.kube\\config']) {
-                    bat 'kubectl get configmap -n monitoring'
-                    bat 'kubectl get deployments -n monitoring'
-                    bat 'kubectl get pods -n monitoring'
-                    bat 'kubectl get services -n monitoring'
-                }
+                bat 'kubectl get configmap -n %MONITORING_NAMESPACE%'
+                bat 'kubectl get deployments -n %MONITORING_NAMESPACE%'
+                bat 'kubectl get pods -n %MONITORING_NAMESPACE%'
+                bat 'kubectl get services -n %MONITORING_NAMESPACE%'
             }
         }
     }
 
     post {
         success {
-            echo 'Flask application and monitoring resources deployed successfully!'
+            echo "Deployment successful! Image: python-flask-app:${env.IMAGE_TAG}"
         }
 
         failure {
