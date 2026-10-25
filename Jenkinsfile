@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -14,7 +15,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo 'Starting Flask Kubernetes deployment pipeline'
+                echo 'Starting Flask testing and Kubernetes deployment pipeline'
                 checkout scm
 
                 script {
@@ -24,10 +25,13 @@ pipeline {
             }
         }
 
-        stage('Run Python Tests') {
+        stage('Automated Unit Tests and Coverage') {
             steps {
+                bat 'if not exist reports mkdir reports'
                 bat '"%PYTHON%" -m pip install -r requirements.txt'
-                bat '"%PYTHON%" -m pytest -v'
+                bat '"%PYTHON%" -m pip install pytest pytest-cov'
+
+                bat '"%PYTHON%" -m pytest tests/ -v --junitxml=reports\\unit-tests.xml --cov=app --cov-report=xml:reports\\coverage.xml --cov-report=html:reports\\coverage-html'
             }
         }
 
@@ -40,6 +44,61 @@ pipeline {
         stage('Verify Docker Image') {
             steps {
                 bat 'docker image inspect %IMAGE_NAME%:%IMAGE_TAG%'
+            }
+        }
+
+        stage('API Tests with Newman') {
+            steps {
+                script {
+                    try {
+                        // Use port 5001 to avoid conflicting with
+                        // an existing Flask container on port 5000.
+                        bat 'docker rm -f flask-api-test >NUL 2>&1 || exit /b 0'
+
+                        bat 'docker run -d --name flask-api-test -p 5001:5000 %IMAGE_NAME%:%IMAGE_TAG%'
+
+                        // Wait for the newly built application to become ready.
+                        powershell '''
+                            $ready = $false
+
+                            for ($i = 0; $i -lt 30; $i++) {
+                                try {
+                                    $response = Invoke-RestMethod `
+                                        -Uri "http://localhost:5001/health" `
+                                        -TimeoutSec 3
+
+                                    if ($response.status -eq "healthy") {
+                                        $ready = $true
+                                        break
+                                    }
+                                }
+                                catch {
+                                    Start-Sleep -Seconds 2
+                                }
+                            }
+
+                            if (-not $ready) {
+                                docker logs flask-api-test
+                                throw "Flask API did not become healthy on port 5001."
+                            }
+
+                            Write-Host "Flask API is healthy."
+                        '''
+
+                        // Run Newman inside Docker; no host Node.js installation needed.
+                        bat '''
+                            docker run --rm ^
+                              -v "%WORKSPACE%\\postman:/etc/newman:ro" ^
+                              -v "%WORKSPACE%\\reports:/reports" ^
+                              node:24-slim ^
+                              sh -c "npm install -g newman && newman run /etc/newman/flask-api-tests.json --env-var baseUrl=http://host.docker.internal:5001 --reporters cli,junit --reporter-junit-export /reports/api-tests.xml"
+                        '''
+                    }
+                    finally {
+                        // Remove the temporary test container even if tests fail.
+                        bat 'docker rm -f flask-api-test >NUL 2>&1 || exit /b 0'
+                    }
+                }
             }
         }
 
@@ -143,6 +202,22 @@ pipeline {
     }
 
     post {
+        always {
+            // Publish reports even when a test fails.
+            junit testResults: 'reports/*-tests.xml', allowEmptyResults: true
+
+            publishHTML(target: [
+                reportName: 'Code Coverage Report',
+                reportDir: 'reports/coverage-html',
+                reportFiles: 'index.html',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+
+            archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+        }
+
         success {
             echo "Deployment successful! Image: python-flask-app:${env.IMAGE_TAG}"
             echo 'Prometheus: http://localhost:9090/targets'
