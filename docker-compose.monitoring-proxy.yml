@@ -7,7 +7,7 @@ services:
     ports:
       - "9090:9090"
       - "3000:3000"
-      - "5000:5000"
+      - "5002:5000"
     networks:
       - kind
     volumes:
