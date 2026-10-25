@@ -178,10 +178,9 @@ pipeline {
                 echo 'Validating Docker Compose configuration'
                 bat 'docker compose -f docker-compose.monitoring-proxy.yml config -q'
 
-                echo 'Starting or updating the host proxy'
-                bat 'docker compose -f docker-compose.monitoring-proxy.yml up -d --no-recreate'
-
+                echo 'Checking existing monitoring proxy'
                 bat 'docker inspect --format="{{.State.Status}}" monitoring-host-proxy'
+
                 bat 'docker port monitoring-host-proxy'
             }
         }
