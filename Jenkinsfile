@@ -15,7 +15,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo 'Starting Flask testing and Kubernetes deployment pipeline'
+                echo 'Starting Flask testing, Kubernetes deployment, and monitoring pipeline'
                 checkout scm
 
                 script {
@@ -30,7 +30,6 @@ pipeline {
                 bat 'if not exist reports mkdir reports'
                 bat '"%PYTHON%" -m pip install -r requirements.txt'
                 bat '"%PYTHON%" -m pip install pytest pytest-cov'
-
                 bat '"%PYTHON%" -m pytest tests/ -v --junitxml=reports\\unit-tests.xml --cov=app --cov-report=xml:reports\\coverage.xml --cov-report=html:reports\\coverage-html'
             }
         }
@@ -51,13 +50,9 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Use port 5001 to avoid conflicting with
-                        // an existing Flask container on port 5000.
                         bat 'docker rm -f flask-api-test >NUL 2>&1 || exit /b 0'
-
                         bat 'docker run -d --name flask-api-test -p 5001:5000 %IMAGE_NAME%:%IMAGE_TAG%'
 
-                        // Wait for the newly built application to become ready.
                         powershell '''
                             $ready = $false
 
@@ -85,7 +80,6 @@ pipeline {
                             Write-Host "Flask API is healthy."
                         '''
 
-                        // Run Newman inside Docker; no host Node.js installation needed.
                         bat '''
                             docker run --rm ^
                               -v "%WORKSPACE%\\postman:/etc/newman:ro" ^
@@ -95,7 +89,6 @@ pipeline {
                         '''
                     }
                     finally {
-                        // Remove the temporary test container even if tests fail.
                         bat 'docker rm -f flask-api-test >NUL 2>&1 || exit /b 0'
                     }
                 }
@@ -145,6 +138,18 @@ pipeline {
             }
         }
 
+        stage('Install Blackbox Exporter') {
+            steps {
+                bat 'helm repo add prometheus-community https://prometheus-community.github.io/helm-charts'
+                bat 'helm repo update'
+
+                bat 'helm upgrade --install blackbox prometheus-community/prometheus-blackbox-exporter --namespace %MONITORING_NAMESPACE% --create-namespace --wait --timeout 180s'
+
+                bat 'kubectl rollout status deployment/blackbox-prometheus-blackbox-exporter -n %MONITORING_NAMESPACE% --timeout=180s'
+                bat 'kubectl get svc blackbox-prometheus-blackbox-exporter -n %MONITORING_NAMESPACE%'
+            }
+        }
+
         stage('Deploy Prometheus') {
             steps {
                 bat 'kubectl apply -f observability/prometheus/prometheus-configmap.yaml'
@@ -180,7 +185,6 @@ pipeline {
 
                 echo 'Checking existing monitoring proxy'
                 bat 'docker inspect --format="{{.State.Status}}" monitoring-host-proxy'
-
                 bat 'docker port monitoring-host-proxy'
             }
         }
@@ -192,17 +196,56 @@ pipeline {
             }
         }
 
-        stage('Verify Prometheus Metrics') {
+        stage('Verify Prometheus Metrics and Blackbox Probe') {
             steps {
                 bat 'kubectl exec deployment/monitoring-proxy -n %MONITORING_NAMESPACE% -- wget -qO- http://prometheus-service.monitoring.svc.cluster.local:9090/-/ready'
                 bat 'kubectl exec deployment/monitoring-proxy -n %MONITORING_NAMESPACE% -- wget -qO- http://grafana-service.monitoring.svc.cluster.local:3000/api/health'
+
+                powershell '''
+                    $base = "http://localhost:9090"
+
+                    $queries = @(
+                        "up{job=`"flask-app`"}",
+                        "probe_success{job=`"flask-app-blackbox`"}"
+                    )
+
+                    foreach ($query in $queries) {
+                        $encoded = [System.Uri]::EscapeDataString($query)
+                        $url = "$base/api/v1/query?query=$encoded"
+                        $found = $false
+
+                        for ($i = 0; $i -lt 12; $i++) {
+                            try {
+                                $result = Invoke-RestMethod -Uri $url -TimeoutSec 10
+
+                                if ($result.status -eq "success" -and
+                                    $result.data.result.Count -gt 0) {
+                                    $found = $true
+                                    Write-Host "Prometheus query returned data: $query"
+                                    $result.data.result | ConvertTo-Json -Depth 6
+                                    break
+                                }
+                            }
+                            catch {
+                                Write-Host "Waiting for Prometheus query: $query"
+                            }
+
+                            Start-Sleep -Seconds 5
+                        }
+
+                        if (-not $found) {
+                            throw "No data returned for query: $query. Check the Prometheus configuration and target status."
+                        }
+                    }
+                '''
+
+                bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE%'
             }
         }
     }
 
     post {
         always {
-            // Publish reports even when a test fails.
             junit testResults: 'reports/*-tests.xml', allowEmptyResults: true
 
             publishHTML(target: [
