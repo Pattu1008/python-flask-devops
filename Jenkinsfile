@@ -166,7 +166,6 @@ pipeline {
                 echo 'Deploying Node Exporter for node-level metrics'
 
                 bat 'kubectl apply -f observability/node-exporter.yaml'
-
                 bat 'kubectl rollout status daemonset/node-exporter -n %MONITORING_NAMESPACE% --timeout=180s'
 
                 bat 'kubectl get daemonset node-exporter -n %MONITORING_NAMESPACE%'
@@ -197,9 +196,24 @@ pipeline {
             }
         }
 
+        stage('Deploy Loki and Alloy') {
+            steps {
+                echo 'Deploying Loki log storage'
+                bat 'kubectl apply -f observability/loki/loki.yaml'
+                bat 'kubectl rollout status deployment/loki -n %MONITORING_NAMESPACE% --timeout=180s'
+
+                echo 'Deploying Grafana Alloy log collector'
+                bat 'kubectl apply -f observability/alloy/alloy.yaml'
+                bat 'kubectl rollout status deployment/alloy -n %MONITORING_NAMESPACE% --timeout=180s'
+
+                bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE%'
+            }
+        }
+
         stage('Deploy Grafana') {
             steps {
                 bat 'kubectl apply -f observability/grafana/grafana-datasource.yaml'
+                bat 'kubectl apply -f observability/grafana/loki-datasource.yaml'
                 bat 'kubectl apply -f observability/grafana/grafana-deployment.yaml'
                 bat 'kubectl apply -f observability/grafana/grafana-service.yaml'
                 bat 'kubectl rollout status deployment/grafana -n %MONITORING_NAMESPACE% --timeout=180s'
