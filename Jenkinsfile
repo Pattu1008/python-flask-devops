@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -33,6 +32,19 @@ pipeline {
                 bat '"%HELM_EXE%" version'
                 bat 'kubectl version --client'
                 bat 'docker version'
+            }
+        }
+
+        stage('Validate Nginx Configuration') {
+            steps {
+                echo 'Validating monitoring-host-proxy.conf'
+
+                bat '''
+                    docker run --rm ^
+                      --network kind ^
+                      -v "%WORKSPACE%\\monitoring-host-proxy.conf:/etc/nginx/nginx.conf:ro" ^
+                      nginx:stable-alpine nginx -t
+                '''
             }
         }
 
@@ -153,9 +165,7 @@ pipeline {
             steps {
                 bat '"%HELM_EXE%" repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update'
                 bat '"%HELM_EXE%" repo update'
-
                 bat '"%HELM_EXE%" upgrade --install blackbox prometheus-community/prometheus-blackbox-exporter --namespace %MONITORING_NAMESPACE% --create-namespace --wait --timeout 180s'
-
                 bat 'kubectl rollout status deployment/blackbox-prometheus-blackbox-exporter -n %MONITORING_NAMESPACE% --timeout=180s'
                 bat 'kubectl get svc blackbox-prometheus-blackbox-exporter -n %MONITORING_NAMESPACE%'
             }
@@ -164,10 +174,8 @@ pipeline {
         stage('Deploy Node Exporter') {
             steps {
                 echo 'Deploying Node Exporter for node-level metrics'
-
                 bat 'kubectl apply -f observability/node-exporter.yaml'
                 bat 'kubectl rollout status daemonset/node-exporter -n %MONITORING_NAMESPACE% --timeout=180s'
-
                 bat 'kubectl get daemonset node-exporter -n %MONITORING_NAMESPACE%'
                 bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE% -l app=node-exporter'
             }
@@ -176,9 +184,7 @@ pipeline {
         stage('Install kube-state-metrics') {
             steps {
                 echo 'Installing Kubernetes object-state metrics'
-
                 bat '"%HELM_EXE%" upgrade --install kube-state-metrics prometheus-community/kube-state-metrics --namespace %MONITORING_NAMESPACE% --create-namespace --wait --timeout 180s'
-
                 bat 'kubectl rollout status deployment/kube-state-metrics -n %MONITORING_NAMESPACE% --timeout=180s'
                 bat 'kubectl get deployment kube-state-metrics -n %MONITORING_NAMESPACE%'
                 bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE% -l app.kubernetes.io/name=kube-state-metrics'
@@ -190,7 +196,6 @@ pipeline {
                 bat 'kubectl apply -f observability/prometheus/prometheus-configmap.yaml'
                 bat 'kubectl apply -f observability/prometheus/prometheus-deployment.yaml'
                 bat 'kubectl apply -f observability/prometheus/prometheus-service.yaml'
-
                 bat 'kubectl rollout restart deployment/prometheus -n %MONITORING_NAMESPACE%'
                 bat 'kubectl rollout status deployment/prometheus -n %MONITORING_NAMESPACE% --timeout=180s'
             }
@@ -205,7 +210,6 @@ pipeline {
                 echo 'Deploying Grafana Alloy log collector'
                 bat 'kubectl apply -f observability/alloy/alloy.yaml'
                 bat 'kubectl rollout status deployment/alloy -n %MONITORING_NAMESPACE% --timeout=180s'
-
                 bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE%'
             }
         }
@@ -213,13 +217,10 @@ pipeline {
         stage('Deploy Grafana') {
             steps {
                 echo 'Applying combined Prometheus and Loki datasource configuration'
-
                 bat 'kubectl apply -f observability/grafana/grafana-datasource.yaml'
                 bat 'kubectl apply -f observability/grafana/grafana-deployment.yaml'
                 bat 'kubectl apply -f observability/grafana/grafana-service.yaml'
-
                 bat 'kubectl rollout status deployment/grafana -n %MONITORING_NAMESPACE% --timeout=180s'
-
                 bat 'kubectl get deployment grafana -n %MONITORING_NAMESPACE%'
                 bat 'kubectl get pods -n %MONITORING_NAMESPACE% -l app=grafana'
             }
