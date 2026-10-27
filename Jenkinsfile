@@ -10,6 +10,7 @@ pipeline {
         KUBECONFIG = 'C:\\Users\\Prateek Sangle\\.kube\\config'
         PYTHON = 'C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
         KIND_EXE = 'C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\kind\\kind.exe'
+        HELM_EXE = 'C:\\Users\\Prateek Sangle\\bin\\helm.exe'
     }
 
     stages {
@@ -22,6 +23,16 @@ pipeline {
                     env.IMAGE_TAG = "${env.BUILD_NUMBER}"
                     echo "Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
                 }
+            }
+        }
+
+        stage('Verify Tools') {
+            steps {
+                bat '"%PYTHON%" --version'
+                bat '"%KIND_EXE%" version'
+                bat '"%HELM_EXE%" version'
+                bat 'kubectl version --client'
+                bat 'docker version'
             }
         }
 
@@ -140,10 +151,10 @@ pipeline {
 
         stage('Install Blackbox Exporter') {
             steps {
-                bat 'helm repo add prometheus-community https://prometheus-community.github.io/helm-charts'
-                bat 'helm repo update'
+                bat '"%HELM_EXE%" repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update'
+                bat '"%HELM_EXE%" repo update'
 
-                bat 'helm upgrade --install blackbox prometheus-community/prometheus-blackbox-exporter --namespace %MONITORING_NAMESPACE% --create-namespace --wait --timeout 180s'
+                bat '"%HELM_EXE%" upgrade --install blackbox prometheus-community/prometheus-blackbox-exporter --namespace %MONITORING_NAMESPACE% --create-namespace --wait --timeout 180s'
 
                 bat 'kubectl rollout status deployment/blackbox-prometheus-blackbox-exporter -n %MONITORING_NAMESPACE% --timeout=180s'
                 bat 'kubectl get svc blackbox-prometheus-blackbox-exporter -n %MONITORING_NAMESPACE%'
@@ -180,10 +191,7 @@ pipeline {
 
         stage('Expose Monitoring Dashboards') {
             steps {
-                echo 'Validating Docker Compose configuration'
                 bat 'docker compose -f docker-compose.monitoring-proxy.yml config -q'
-
-                echo 'Checking existing monitoring proxy'
                 bat 'docker inspect --format="{{.State.Status}}" monitoring-host-proxy'
                 bat 'docker port monitoring-host-proxy'
             }
@@ -203,7 +211,6 @@ pipeline {
 
                 powershell '''
                     $base = "http://localhost:9090"
-
                     $queries = @(
                         "up{job=`"flask-app`"}",
                         "probe_success{job=`"flask-app-blackbox`"}"
@@ -218,8 +225,7 @@ pipeline {
                             try {
                                 $result = Invoke-RestMethod -Uri $url -TimeoutSec 10
 
-                                if ($result.status -eq "success" -and
-                                    $result.data.result.Count -gt 0) {
+                                if ($result.status -eq "success" -and $result.data.result.Count -gt 0) {
                                     $found = $true
                                     Write-Host "Prometheus query returned data: $query"
                                     $result.data.result | ConvertTo-Json -Depth 6
@@ -234,7 +240,7 @@ pipeline {
                         }
 
                         if (-not $found) {
-                            throw "No data returned for query: $query. Check the Prometheus configuration and target status."
+                            throw "No data returned for query: $query. Check prometheus.yml, ConfigMap, and targets."
                         }
                     }
                 '''
