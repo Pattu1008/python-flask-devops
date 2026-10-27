@@ -25,15 +25,7 @@ pipeline {
             }
         }
 
-        stage('Verify Tools') {
-            steps {
-                bat '"%PYTHON%" --version'
-                bat '"%KIND_EXE%" version'
-                bat '"%HELM_EXE%" version'
-                bat 'kubectl version --client'
-                bat 'docker version'
-            }
-        }
+        
 
         stage('Validate Nginx Configuration') {
             steps {
