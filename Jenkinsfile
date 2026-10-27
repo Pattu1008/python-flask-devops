@@ -12,6 +12,7 @@ pipeline {
         PYTHON = 'C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
         KIND_EXE = 'C:\\Users\\Prateek Sangle\\AppData\\Local\\Programs\\kind\\kind.exe'
         HELM_EXE = 'C:\\Users\\Prateek Sangle\\bin\\helm.exe'
+        TRIVY_EXE = 'C:\\Users\\Prateek Sangle\\bin\\trivy.exe'
     }
 
     stages {
@@ -34,6 +35,79 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 bat 'docker build -t %IMAGE_NAME%:%IMAGE_TAG% .'
+            }
+        }
+
+        stage('Trivy Dependency Scan') {
+            steps {
+                bat 'if not exist reports mkdir reports'
+
+                bat '''
+                    "%TRIVY_EXE%" fs ^
+                      --scanners vuln ^
+                      --format json ^
+                      --output reports\\trivy-fs.json ^
+                      --exit-code 0 ^
+                      --no-progress ^
+                      .
+                '''
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                bat '''
+                    "%TRIVY_EXE%" image ^
+                      --scanners vuln ^
+                      --format json ^
+                      --output reports\\trivy-image.json ^
+                      --exit-code 0 ^
+                      --no-progress ^
+                      %IMAGE_NAME%:%IMAGE_TAG%
+                '''
+            }
+        }
+
+        stage('Trivy Security Gate') {
+            steps {
+                powershell '''
+                    $reportPaths = @(
+                        "reports/trivy-fs.json",
+                        "reports/trivy-image.json"
+                    )
+
+                    $critical = @()
+
+                    foreach ($path in $reportPaths) {
+                        if (-not (Test-Path $path)) {
+                            throw "Trivy report is missing: $path"
+                        }
+
+                        $report = Get-Content $path -Raw | ConvertFrom-Json
+
+                        foreach ($result in $report.Results) {
+                            foreach ($vuln in $result.Vulnerabilities) {
+                                if ($vuln.Severity -eq "CRITICAL") {
+                                    $critical += [PSCustomObject]@{
+                                        Report        = $path
+                                        Target        = $result.Target
+                                        Vulnerability = $vuln.VulnerabilityID
+                                        Package       = $vuln.PkgName
+                                        Installed     = $vuln.InstalledVersion
+                                        Fixed         = $vuln.FixedVersion
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if ($critical.Count -gt 0) {
+                        $critical | Format-Table -AutoSize | Out-String | Write-Host
+                        throw "Security gate failed: critical vulnerabilities detected."
+                    }
+
+                    Write-Host "Security gate passed: no critical vulnerabilities detected."
+                '''
             }
         }
 
