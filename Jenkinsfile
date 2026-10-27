@@ -161,6 +161,19 @@ pipeline {
             }
         }
 
+        stage('Deploy Node Exporter') {
+            steps {
+                echo 'Deploying Node Exporter for node-level metrics'
+
+                bat 'kubectl apply -f observability/node-exporter.yaml'
+
+                bat 'kubectl rollout status daemonset/node-exporter -n %MONITORING_NAMESPACE% --timeout=180s'
+
+                bat 'kubectl get daemonset node-exporter -n %MONITORING_NAMESPACE%'
+                bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE% -l app=node-exporter'
+            }
+        }
+
         stage('Deploy Prometheus') {
             steps {
                 bat 'kubectl apply -f observability/prometheus/prometheus-configmap.yaml'
@@ -211,9 +224,11 @@ pipeline {
 
                 powershell '''
                     $base = "http://localhost:9090"
+
                     $queries = @(
                         "up{job=`"flask-app`"}",
-                        "probe_success{job=`"flask-app-blackbox`"}"
+                        "probe_success{job=`"flask-app-blackbox`"}",
+                        "up{job=`"node-exporter`"}"
                     )
 
                     foreach ($query in $queries) {
@@ -240,7 +255,18 @@ pipeline {
                         }
 
                         if (-not $found) {
-                            throw "No data returned for query: $query. Check prometheus.yml, ConfigMap, and targets."
+                            throw "No data returned for query: $query. Check Prometheus configuration and targets."
+                        }
+
+                        if ($query -eq 'up{job="node-exporter"}') {
+                            $downTargets = @(
+                                $result.data.result |
+                                Where-Object { [double]$_.value[1] -ne 1 }
+                            )
+
+                            if ($downTargets.Count -gt 0) {
+                                throw "Node Exporter target exists but is DOWN."
+                            }
                         }
                     }
                 '''
