@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -18,11 +19,8 @@ pipeline {
             steps {
                 echo 'Starting Flask testing, Kubernetes deployment, and monitoring pipeline'
                 checkout scm
-
-                
             }
         }
-
 
         stage('Automated Unit Tests and Coverage') {
             steps {
@@ -120,7 +118,16 @@ pipeline {
             }
         }
 
-        
+        stage('Verify Application Deployment') {
+            steps {
+                bat 'kubectl rollout status deployment/flask-deployment -n %K8S_NAMESPACE% --timeout=180s'
+                bat 'kubectl get deployment flask-deployment -n %K8S_NAMESPACE%'
+                bat 'kubectl get pods -n %K8S_NAMESPACE%'
+                bat 'kubectl get services -n %K8S_NAMESPACE%'
+
+                bat 'kubectl exec deployment/flask-deployment -n %K8S_NAMESPACE% -- python -c "import urllib.request; print(urllib.request.urlopen(\'http://localhost:5000/health\', timeout=5).read().decode()); print(\'Metrics HTTP status:\', urllib.request.urlopen(\'http://localhost:5000/metrics\', timeout=5).status)"'
+            }
+        }
 
         stage('Create Monitoring Namespace') {
             steps {
@@ -215,8 +222,7 @@ pipeline {
                 bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content"'
             }
         }
-
-        
+    }
 
     post {
         always {
