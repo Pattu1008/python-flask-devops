@@ -1,4 +1,3 @@
-
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,4 +14,14 @@ data:
         access: proxy
         url: http://prometheus-service.monitoring.svc.cluster.local:9090
         isDefault: true
+        editable: true
+
+  loki-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki.monitoring.svc.cluster.local:3100
+        isDefault: false
         editable: true

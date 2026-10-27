@@ -27,16 +27,7 @@ spec:
           volumeMounts:
             - name: grafana-datasources
               mountPath: /etc/grafana/provisioning/datasources
-            - name: grafana-loki-datasource
-              mountPath: /etc/grafana/provisioning/datasources/loki.yaml
-              subPath: loki-datasource.yaml
       volumes:
         - name: grafana-datasources
           configMap:
             name: grafana-datasources
-        - name: grafana-loki-datasource
-          configMap:
-            name: grafana-loki-datasource
-            items:
-              - key: loki-datasource.yaml
-                path: loki-datasource.yaml

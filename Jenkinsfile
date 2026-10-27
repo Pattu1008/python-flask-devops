@@ -212,11 +212,16 @@ pipeline {
 
         stage('Deploy Grafana') {
             steps {
+                echo 'Applying combined Prometheus and Loki datasource configuration'
+
                 bat 'kubectl apply -f observability/grafana/grafana-datasource.yaml'
-                bat 'kubectl apply -f observability/grafana/loki-datasource.yaml'
                 bat 'kubectl apply -f observability/grafana/grafana-deployment.yaml'
                 bat 'kubectl apply -f observability/grafana/grafana-service.yaml'
+
                 bat 'kubectl rollout status deployment/grafana -n %MONITORING_NAMESPACE% --timeout=180s'
+
+                bat 'kubectl get deployment grafana -n %MONITORING_NAMESPACE%'
+                bat 'kubectl get pods -n %MONITORING_NAMESPACE% -l app=grafana'
             }
         }
 
@@ -239,7 +244,7 @@ pipeline {
         stage('Verify Monitoring Dashboard Access') {
             steps {
                 bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:9090/-/ready -TimeoutSec 10 -UseBasicParsing).Content"'
-                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content'
+                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content"'
             }
         }
 
