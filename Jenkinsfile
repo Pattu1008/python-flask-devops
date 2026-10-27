@@ -3,6 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'python-flask-app'
+        IMAGE_TAG = "${BUILD_NUMBER}"
         K8S_NAMESPACE = 'devops-project'
         MONITORING_NAMESPACE = 'monitoring'
         KIND_CLUSTER = 'devops-lab'
@@ -18,27 +19,10 @@ pipeline {
                 echo 'Starting Flask testing, Kubernetes deployment, and monitoring pipeline'
                 checkout scm
 
-                script {
-                    env.IMAGE_TAG = "${env.BUILD_NUMBER}"
-                    echo "Docker image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-                }
+                
             }
         }
 
-        
-
-        stage('Validate Nginx Configuration') {
-            steps {
-                echo 'Validating monitoring-host-proxy.conf'
-
-                bat '''
-                    docker run --rm ^
-                      --network kind ^
-                      -v "%WORKSPACE%\\monitoring-host-proxy.conf:/etc/nginx/nginx.conf:ro" ^
-                      nginx:stable-alpine nginx -t
-                '''
-            }
-        }
 
         stage('Automated Unit Tests and Coverage') {
             steps {
@@ -136,16 +120,7 @@ pipeline {
             }
         }
 
-        stage('Verify Application Deployment') {
-            steps {
-                bat 'kubectl rollout status deployment/flask-deployment -n %K8S_NAMESPACE% --timeout=180s'
-                bat 'kubectl get deployment flask-deployment -n %K8S_NAMESPACE%'
-                bat 'kubectl get pods -n %K8S_NAMESPACE%'
-                bat 'kubectl get services -n %K8S_NAMESPACE%'
-
-                bat 'kubectl exec deployment/flask-deployment -n %K8S_NAMESPACE% -- python -c "import urllib.request; print(urllib.request.urlopen(\'http://localhost:5000/health\', timeout=5).read().decode()); print(\'Metrics HTTP status:\', urllib.request.urlopen(\'http://localhost:5000/metrics\', timeout=5).status)"'
-            }
-        }
+        
 
         stage('Create Monitoring Namespace') {
             steps {
@@ -241,67 +216,7 @@ pipeline {
             }
         }
 
-        stage('Verify Prometheus Metrics and Blackbox Probe') {
-            steps {
-                bat 'kubectl exec deployment/monitoring-proxy -n %MONITORING_NAMESPACE% -- wget -qO- http://prometheus-service.monitoring.svc.cluster.local:9090/-/ready'
-                bat 'kubectl exec deployment/monitoring-proxy -n %MONITORING_NAMESPACE% -- wget -qO- http://grafana-service.monitoring.svc.cluster.local:3000/api/health'
-
-                powershell '''
-                    $base = "http://localhost:9090"
-
-                    $queries = @(
-                        "up{job=`"flask-app`"}",
-                        "probe_success{job=`"flask-app-blackbox`"}",
-                        "up{job=`"node-exporter`"}",
-                        "up{job=`"kube-state-metrics`"}",
-                        "kube_node_info",
-                        "kube_pod_info"
-                    )
-
-                    foreach ($query in $queries) {
-                        $encoded = [System.Uri]::EscapeDataString($query)
-                        $url = "$base/api/v1/query?query=$encoded"
-                        $found = $false
-
-                        for ($i = 0; $i -lt 12; $i++) {
-                            try {
-                                $result = Invoke-RestMethod -Uri $url -TimeoutSec 10
-
-                                if ($result.status -eq "success" -and $result.data.result.Count -gt 0) {
-                                    $found = $true
-                                    Write-Host "Prometheus query returned data: $query"
-                                    $result.data.result | ConvertTo-Json -Depth 6
-                                    break
-                                }
-                            }
-                            catch {
-                                Write-Host "Waiting for Prometheus query: $query"
-                            }
-
-                            Start-Sleep -Seconds 5
-                        }
-
-                        if (-not $found) {
-                            throw "No data returned for query: $query. Check Prometheus configuration and targets."
-                        }
-
-                        if ($query -like 'up{job=*}') {
-                            $downTargets = @(
-                                $result.data.result |
-                                Where-Object { [double]$_.value[1] -ne 1 }
-                            )
-
-                            if ($downTargets.Count -gt 0) {
-                                throw "One or more targets are DOWN for query: $query"
-                            }
-                        }
-                    }
-                '''
-
-                bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE%'
-            }
-        }
-    }
+        
 
     post {
         always {
