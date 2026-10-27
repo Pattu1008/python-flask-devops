@@ -174,6 +174,18 @@ pipeline {
             }
         }
 
+        stage('Install kube-state-metrics') {
+            steps {
+                echo 'Installing Kubernetes object-state metrics'
+
+                bat '"%HELM_EXE%" upgrade --install kube-state-metrics prometheus-community/kube-state-metrics --namespace %MONITORING_NAMESPACE% --create-namespace --wait --timeout 180s'
+
+                bat 'kubectl rollout status deployment/kube-state-metrics -n %MONITORING_NAMESPACE% --timeout=180s'
+                bat 'kubectl get deployment kube-state-metrics -n %MONITORING_NAMESPACE%'
+                bat 'kubectl get pods,svc -n %MONITORING_NAMESPACE% -l app.kubernetes.io/name=kube-state-metrics'
+            }
+        }
+
         stage('Deploy Prometheus') {
             steps {
                 bat 'kubectl apply -f observability/prometheus/prometheus-configmap.yaml'
@@ -228,7 +240,10 @@ pipeline {
                     $queries = @(
                         "up{job=`"flask-app`"}",
                         "probe_success{job=`"flask-app-blackbox`"}",
-                        "up{job=`"node-exporter`"}"
+                        "up{job=`"node-exporter`"}",
+                        "up{job=`"kube-state-metrics`"}",
+                        "kube_node_info",
+                        "kube_pod_info"
                     )
 
                     foreach ($query in $queries) {
@@ -258,14 +273,14 @@ pipeline {
                             throw "No data returned for query: $query. Check Prometheus configuration and targets."
                         }
 
-                        if ($query -eq 'up{job="node-exporter"}') {
+                        if ($query -like 'up{job=*}') {
                             $downTargets = @(
                                 $result.data.result |
                                 Where-Object { [double]$_.value[1] -ne 1 }
                             )
 
                             if ($downTargets.Count -gt 0) {
-                                throw "Node Exporter target exists but is DOWN."
+                                throw "One or more targets are DOWN for query: $query"
                             }
                         }
                     }

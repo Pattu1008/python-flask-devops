@@ -42,3 +42,9 @@ data:
         static_configs:
           - targets:
               - "node-exporter.monitoring.svc.cluster.local:9100"
+
+      # Kubernetes node and pod information
+      - job_name: "kube-state-metrics"
+        static_configs:
+          - targets:
+              - "kube-state-metrics.monitoring.svc.cluster.local:8080"
