@@ -11,3 +11,18 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["flask-service.devops-project.svc.cluster.local:5000"]
+
+  - job_name: "flask-app-blackbox"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://flask-service.devops-project.svc.cluster.local:5000/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
