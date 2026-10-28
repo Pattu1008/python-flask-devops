@@ -31,7 +31,8 @@ pipeline {
 
                 bat '"%PYTHON%" -m pytest tests/ -v --junitxml=reports\\unit-tests.xml --cov=app --cov-report=xml:reports\\coverage.xml --cov-report=html:reports\\coverage-html'
 
-                bat 'junit2html reports\\unit-tests.xml reports\\unit-tests.html'
+                bat '"%PYTHON%" -m pip install junit2html'
+                bat '"%PYTHON%" -m junit2html reports\\unit-tests.xml reports\\unit-tests.html'
             }
         }
 
