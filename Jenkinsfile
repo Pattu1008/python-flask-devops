@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -31,8 +30,28 @@ pipeline {
 
                 bat '"%PYTHON%" -m pytest tests/ -v --junitxml=reports\\unit-tests.xml --cov=app --cov-report=xml:reports\\coverage.xml --cov-report=html:reports\\coverage-html'
 
-                bat '"%PYTHON%" -m pip install junit2html'
-                bat '"%PYTHON%" -m junit2html reports\\unit-tests.xml reports\\unit-tests.html'
+                powershell '''
+                    $python = $env:PYTHON
+                    $scripts = Join-Path (Split-Path $python) "Scripts"
+                    $converter = Join-Path $scripts "junit2html.exe"
+
+                    if (-not (Test-Path $converter)) {
+                        & $python -m pip install junit2html
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to install junit2html"
+                        }
+                    }
+
+                    if (-not (Test-Path $converter)) {
+                        throw "junit2html executable not found: $converter"
+                    }
+
+                    & $converter "reports/unit-tests.xml" "reports/unit-tests.html"
+
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to generate unit test HTML report"
+                    }
+                '''
             }
         }
 
@@ -163,7 +182,28 @@ pipeline {
                               sh -c "npm install -g newman && newman run /etc/newman/flask-api-tests.json --env-var baseUrl=http://host.docker.internal:5001 --reporters cli,junit --reporter-junit-export /reports/api-tests.xml"
                         '''
 
-                        bat 'junit2html reports\\api-tests.xml reports\\api-tests.html'
+                        powershell '''
+                            $python = $env:PYTHON
+                            $scripts = Join-Path (Split-Path $python) "Scripts"
+                            $converter = Join-Path $scripts "junit2html.exe"
+
+                            if (-not (Test-Path $converter)) {
+                                & $python -m pip install junit2html
+                                if ($LASTEXITCODE -ne 0) {
+                                    throw "Failed to install junit2html"
+                                }
+                            }
+
+                            if (-not (Test-Path $converter)) {
+                                throw "junit2html executable not found: $converter"
+                            }
+
+                            & $converter "reports/api-tests.xml" "reports/api-tests.html"
+
+                            if ($LASTEXITCODE -ne 0) {
+                                throw "Failed to generate API test HTML report"
+                            }
+                        '''
                     }
                     finally {
                         bat 'docker rm -f flask-api-test >NUL 2>&1 || exit /b 0'
@@ -172,7 +212,6 @@ pipeline {
             }
         }
 
-        // DAY 5: DATABASE MIGRATION
         stage('Database Migration with Flyway') {
             steps {
                 bat 'if not exist reports mkdir reports'
@@ -354,10 +393,10 @@ pipeline {
 
     post {
         always {
-            // Publish XML test results in Jenkins' native test report
+            // Native Jenkins test results
             junit testResults: 'reports/*-tests.xml', allowEmptyResults: true
 
-            // Unit test HTML report
+            // Unit test HTML
             publishHTML(target: [
                 reportName: 'Unit Test HTML Report',
                 reportDir: 'reports',
@@ -367,7 +406,7 @@ pipeline {
                 allowMissing: true
             ])
 
-            // API test HTML report
+            // API test HTML
             publishHTML(target: [
                 reportName: 'API Test HTML Report',
                 reportDir: 'reports',
@@ -377,7 +416,7 @@ pipeline {
                 allowMissing: true
             ])
 
-            // Code coverage HTML report
+            // Code coverage HTML
             publishHTML(target: [
                 reportName: 'Code Coverage Report',
                 reportDir: 'reports/coverage-html',
@@ -387,7 +426,7 @@ pipeline {
                 allowMissing: true
             ])
 
-            // Archive XML, HTML, security, and migration reports
+            // Archive all reports
             archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
         }
 
