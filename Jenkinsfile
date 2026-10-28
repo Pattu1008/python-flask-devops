@@ -27,8 +27,11 @@ pipeline {
             steps {
                 bat 'if not exist reports mkdir reports'
                 bat '"%PYTHON%" -m pip install -r requirements.txt'
-                bat '"%PYTHON%" -m pip install pytest pytest-cov'
+                bat '"%PYTHON%" -m pip install pytest pytest-cov junit2html'
+
                 bat '"%PYTHON%" -m pytest tests/ -v --junitxml=reports\\unit-tests.xml --cov=app --cov-report=xml:reports\\coverage.xml --cov-report=html:reports\\coverage-html'
+
+                bat 'junit2html reports\\unit-tests.xml reports\\unit-tests.html'
             }
         }
 
@@ -158,6 +161,8 @@ pipeline {
                               node:24-slim ^
                               sh -c "npm install -g newman && newman run /etc/newman/flask-api-tests.json --env-var baseUrl=http://host.docker.internal:5001 --reporters cli,junit --reporter-junit-export /reports/api-tests.xml"
                         '''
+
+                        bat 'junit2html reports\\api-tests.xml reports\\api-tests.html'
                     }
                     finally {
                         bat 'docker rm -f flask-api-test >NUL 2>&1 || exit /b 0'
@@ -348,8 +353,30 @@ pipeline {
 
     post {
         always {
+            // Publish XML test results in Jenkins' native test report
             junit testResults: 'reports/*-tests.xml', allowEmptyResults: true
 
+            // Unit test HTML report
+            publishHTML(target: [
+                reportName: 'Unit Test HTML Report',
+                reportDir: 'reports',
+                reportFiles: 'unit-tests.html',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+
+            // API test HTML report
+            publishHTML(target: [
+                reportName: 'API Test HTML Report',
+                reportDir: 'reports',
+                reportFiles: 'api-tests.html',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+
+            // Code coverage HTML report
             publishHTML(target: [
                 reportName: 'Code Coverage Report',
                 reportDir: 'reports/coverage-html',
@@ -359,6 +386,7 @@ pipeline {
                 allowMissing: true
             ])
 
+            // Archive XML, HTML, security, and migration reports
             archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
         }
 
