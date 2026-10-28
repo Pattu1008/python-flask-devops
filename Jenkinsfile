@@ -18,7 +18,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo 'Starting Flask testing, Kubernetes deployment, and monitoring pipeline'
+                echo 'Starting Flask testing, database migration, deployment, and monitoring pipeline'
                 checkout scm
             }
         }
@@ -166,6 +166,54 @@ pipeline {
             }
         }
 
+        // DAY 5: DATABASE MIGRATION
+        stage('Database Migration with Flyway') {
+            steps {
+                bat 'if not exist reports mkdir reports'
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'db-credentials',
+                        usernameVariable: 'DB_USER',
+                        passwordVariable: 'DB_PASSWORD'
+                    )
+                ]) {
+                    bat '''
+                        @echo off
+                        set "FLYWAY_URL=jdbc:postgresql://migration-postgres:5432/flaskdb"
+                        set "FLYWAY_USER=%DB_USER%"
+                        set "FLYWAY_PASSWORD=%DB_PASSWORD%"
+
+                        docker network inspect python-project_default >NUL 2>&1
+                        if errorlevel 1 (
+                            echo ERROR: Docker network python-project_default was not found.
+                            echo Check the network using docker network ls.
+                            exit /b 1
+                        )
+
+                        docker run --rm --network python-project_default ^
+                          -e FLYWAY_URL -e FLYWAY_USER -e FLYWAY_PASSWORD ^
+                          -v "%WORKSPACE%\\migrations:/flyway/sql:ro" ^
+                          flyway/flyway:11 migrate > reports\\migration.log 2>&1
+
+                        set "MIGRATE_RESULT=%ERRORLEVEL%"
+                        type reports\\migration.log
+
+                        if not "%MIGRATE_RESULT%"=="0" exit /b %MIGRATE_RESULT%
+
+                        docker run --rm --network python-project_default ^
+                          -e FLYWAY_URL -e FLYWAY_USER -e FLYWAY_PASSWORD ^
+                          -v "%WORKSPACE%\\migrations:/flyway/sql:ro" ^
+                          flyway/flyway:11 info > reports\\migration-info.log 2>&1
+
+                        set "INFO_RESULT=%ERRORLEVEL%"
+                        type reports\\migration-info.log
+                        exit /b %INFO_RESULT%
+                    '''
+                }
+            }
+        }
+
         stage('Load Image into Kind') {
             steps {
                 bat '"%KIND_EXE%" load docker-image %IMAGE_NAME%:%IMAGE_TAG% --name %KIND_CLUSTER%'
@@ -293,7 +341,7 @@ pipeline {
         stage('Verify Monitoring Dashboard Access') {
             steps {
                 bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:9090/-/ready -TimeoutSec 10 -UseBasicParsing).Content"'
-                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content"'
+                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content'
             }
         }
     }

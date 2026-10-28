@@ -1,0 +1,5 @@
+CREATE TABLE employee (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL
+);
