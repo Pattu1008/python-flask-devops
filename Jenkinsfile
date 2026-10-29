@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -87,6 +88,52 @@ pipeline {
                       --exit-code 0 ^
                       --no-progress ^
                       %IMAGE_NAME%:%IMAGE_TAG%
+                '''
+            }
+        }
+
+        stage('Generate Trivy HTML Reports') {
+            steps {
+                bat 'if not exist reports mkdir reports'
+
+                powershell '''
+                    $templatePath = Join-Path $env:WORKSPACE 'templates\\html.tpl'
+
+                    if (-not (Test-Path $templatePath)) {
+                        New-Item -ItemType Directory -Force `
+                            -Path (Split-Path $templatePath) | Out-Null
+
+                        Invoke-WebRequest `
+                            -Uri 'https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl' `
+                            -OutFile $templatePath
+                    }
+
+                    if (-not (Test-Path $templatePath) -or
+                        (Get-Item $templatePath).Length -eq 0) {
+                        throw 'Trivy HTML template is missing or empty.'
+                    }
+                '''
+
+                bat '''
+                    "%TRIVY_EXE%" fs ^
+                      --scanners vuln ^
+                      --format template ^
+                      --template "@templates/html.tpl" ^
+                      --output reports\\trivy-fs.html ^
+                      --exit-code 0 ^
+                      --no-progress ^
+                      .
+                    if errorlevel 1 exit /b 1
+
+                    "%TRIVY_EXE%" image ^
+                      --scanners vuln ^
+                      --format template ^
+                      --template "@templates/html.tpl" ^
+                      --output reports\\trivy-image.html ^
+                      --exit-code 0 ^
+                      --no-progress ^
+                      %IMAGE_NAME%:%IMAGE_TAG%
+                    if errorlevel 1 exit /b 1
                 '''
             }
         }
@@ -386,7 +433,7 @@ pipeline {
         stage('Verify Monitoring Dashboard Access') {
             steps {
                 bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:9090/-/ready -TimeoutSec 10 -UseBasicParsing).Content"'
-                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content'
+                bat 'powershell -NoProfile -Command "$ProgressPreference=\'SilentlyContinue\'; (Invoke-WebRequest http://localhost:3000/api/health -TimeoutSec 10 -UseBasicParsing).Content"'
             }
         }
     }
@@ -421,6 +468,26 @@ pipeline {
                 reportName: 'Code Coverage Report',
                 reportDir: 'reports/coverage-html',
                 reportFiles: 'index.html',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+
+            // Trivy filesystem scan HTML
+            publishHTML(target: [
+                reportName: 'Trivy Filesystem Security Report',
+                reportDir: 'reports',
+                reportFiles: 'trivy-fs.html',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+
+            // Trivy image scan HTML
+            publishHTML(target: [
+                reportName: 'Trivy Image Security Report',
+                reportDir: 'reports',
+                reportFiles: 'trivy-image.html',
                 keepAll: true,
                 alwaysLinkToLastBuild: true,
                 allowMissing: true
